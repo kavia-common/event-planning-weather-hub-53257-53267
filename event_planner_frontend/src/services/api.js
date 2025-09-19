@@ -14,11 +14,25 @@ async function http(path, options = {}) {
   return res.text();
 }
 
-// PUBLIC_INTERFACE
+/**
+ * PUBLIC_INTERFACE
+ */
 export async function getEvents({ page = 1, page_size = 20 } = {}) {
-  /** Fetch a list of events from backend with pagination. */
+  /** Fetch a list of events from backend with pagination.
+   * Always returns an array. If the backend returns a wrapped payload or null,
+   * this function normalizes it to a plain array.
+   */
   const qs = new URLSearchParams({ page, page_size });
-  return http(`/api/events/?${qs.toString()}`, { method: 'GET' });
+  const data = await http(`/api/events/?${qs.toString()}`, { method: 'GET' });
+
+  // Normalize common shapes:
+  // - array -> array
+  // - { results: [...] } or { items: [...] } -> underlying array
+  // - null/undefined/other -> []
+  if (Array.isArray(data)) return data;
+  if (data && Array.isArray(data.results)) return data.results;
+  if (data && Array.isArray(data.items)) return data.items;
+  return [];
 }
 
 // PUBLIC_INTERFACE

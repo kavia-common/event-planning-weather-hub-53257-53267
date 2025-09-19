@@ -44,7 +44,15 @@ function App() {
           getCurrentWeather({ q: locationQuery, units }),
         ]);
         if (!isCancelled) {
-          setEvents(eventsRes || []);
+          // Defensive: normalize events to an array in case backend returns a non-array type
+          const normalizedEvents = Array.isArray(eventsRes)
+            ? eventsRes
+            : (eventsRes && Array.isArray(eventsRes.results))
+              ? eventsRes.results
+              : (eventsRes && Array.isArray(eventsRes.items))
+                ? eventsRes.items
+                : [];
+          setEvents(normalizedEvents);
           setForecast(forecastRes || null);
           setCurrentWeather(currentRes || null);
         }
@@ -147,8 +155,8 @@ function App() {
               <CalendarView
                 activeDate={activeDate}
                 onDateChange={setActiveDate}
-                forecastDaily={(forecast && forecast.daily) || []}
-                events={events}
+                forecastDaily={(forecast && Array.isArray(forecast.daily) ? forecast.daily : [])}
+                events={Array.isArray(events) ? events : []}
                 units={units}
               />
               <SuggestionsPanel

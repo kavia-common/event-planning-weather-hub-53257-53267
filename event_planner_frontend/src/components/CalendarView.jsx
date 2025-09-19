@@ -8,6 +8,10 @@ import React, { useMemo } from 'react';
 function CalendarView({ activeDate, onDateChange, forecastDaily = [], events = [], units = 'metric' }) {
   const now = new Date(activeDate);
 
+  // Defensive normalization to avoid runtime TypeErrors if callers pass non-arrays
+  const safeForecastDaily = Array.isArray(forecastDaily) ? forecastDaily : [];
+  const safeEvents = Array.isArray(events) ? events : [];
+
   const monthMeta = useMemo(() => {
     const year = now.getFullYear();
     const month = now.getMonth();
@@ -34,22 +38,23 @@ function CalendarView({ activeDate, onDateChange, forecastDaily = [], events = [
 
   const dailyByDate = useMemo(() => {
     const map = {};
-    (forecastDaily || []).forEach((d) => {
+    (safeForecastDaily || []).forEach((d) => {
       const ds = new Date(((d.dt || 0) * 1000) || d.date).toISOString().slice(0, 10);
       map[ds] = d;
     });
     return map;
-  }, [forecastDaily]);
+  }, [safeForecastDaily]);
 
   const eventsByDate = useMemo(() => {
     const map = {};
-    (events || []).forEach((e) => {
+    (safeEvents || []).forEach((e) => {
+      if (!e || !e.date) return;
       const ds = new Date(e.date).toISOString().slice(0, 10);
       if (!map[ds]) map[ds] = [];
       map[ds].push(e);
     });
     return map;
-  }, [events]);
+  }, [safeEvents]);
 
   const title = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(now);
 
