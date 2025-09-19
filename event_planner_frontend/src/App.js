@@ -58,7 +58,10 @@ function App() {
         }
       } catch (e) {
         if (!isCancelled) {
-          setApiError('Failed to fetch data from server. Please try again.');
+          // eslint-disable-next-line no-console
+          console.error('API aggregated load error:', e && (e.raw || e));
+          const msg = (e && e.message) || 'Failed to fetch data from server. Please try again.';
+          setApiError(msg);
         }
       } finally {
         if (!isCancelled) setLoading(false);

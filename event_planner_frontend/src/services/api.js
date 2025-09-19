@@ -1,17 +1,74 @@
 const API_BASE = process.env.REACT_APP_API_BASE || '';
 
-async function http(path, options = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-    ...options,
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(text || `Request failed: ${res.status}`);
+/**
+ * Internal helper to log raw responses for debugging.
+ */
+function debugLog(label, payload) {
+  try {
+    // eslint-disable-next-line no-console
+    console.debug(`[API] ${label}:`, payload);
+  } catch {
+    // ignore
   }
-  const contentType = res.headers.get('content-type') || '';
-  if (contentType.includes('application/json')) return res.json();
-  return res.text();
+}
+
+/**
+ * Wrap fetch handling to support normalized envelopes and detailed error messages.
+ */
+async function http(path, options = {}) {
+  const url = `${API_BASE}${path}`;
+  let res;
+  try {
+    res = await fetch(url, {
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+      ...options,
+    });
+  } catch (networkErr) {
+    debugLog(`NETWORK_ERROR ${url}`, networkErr);
+    throw new Error(`Network error contacting server`);
+  }
+
+  const contentType = (res.headers && res.headers.get && res.headers.get('content-type')) || '';
+  const isJson = contentType.includes('application/json');
+
+  if (!res.ok) {
+    if (isJson) {
+      const errJson = await res.json().catch(() => null);
+      debugLog(`HTTP_ERROR ${url}`, errJson);
+      const message =
+        (errJson && (errJson.message || errJson.error || errJson.detail)) ||
+        `Request failed: ${res.status}`;
+      const e = new Error(message);
+      e.raw = errJson;
+      e.status = res.status;
+      throw e;
+    }
+    const text = await res.text().catch(() => '');
+    debugLog(`HTTP_ERROR_TEXT ${url}`, text);
+    const e = new Error(text || `Request failed: ${res.status}`);
+    e.raw = text;
+    e.status = res.status;
+    throw e;
+  }
+
+  const body = isJson ? await res.json().catch(() => null) : await res.text().catch(() => '');
+  debugLog(`HTTP_OK ${url}`, body);
+
+  // If backend returns a normalized envelope { success, data, error }
+  if (isJson && body && typeof body === 'object' && ('success' in body || 'data' in body || 'error' in body)) {
+    if (body.success === true) {
+      return body.data !== undefined ? body.data : body;
+    }
+    // Treat explicit error envelope as failure
+    const e = new Error(
+      (body && (body.message || body.error || (body.errors && JSON.stringify(body.errors)))) ||
+        'Server returned an error'
+    );
+    e.raw = body;
+    throw e;
+  }
+
+  return body;
 }
 
 /**
@@ -46,11 +103,16 @@ export async function getCurrentWeather({ q, lat, lon, units = 'metric', lang } 
   /** Fetch current weather via backend proxy. */
   const params = new URLSearchParams();
   if (q) params.set('q', q);
-  if (lat) params.set('lat', lat);
-  if (lon) params.set('lon', lon);
+  if (lat) params.set('lat', String(lat));
+  if (lon) params.set('lon', String(lon));
   if (units) params.set('units', units);
   if (lang) params.set('lang', lang);
-  return http(`/api/weather/current?${params.toString()}`, { method: 'GET' });
+  const data = await http(`/api/weather/current?${params.toString()}`, { method: 'GET' });
+
+  // If data is envelope-unwrapped by http(), proceed. Ensure we return an object that components expect.
+  // Current weather (OpenWeather-like): expect { main: { temp }, weather: [{ icon, description }] }
+  if (data && typeof data === 'object') return data;
+  return null;
 }
 
 // PUBLIC_INTERFACE
@@ -58,8 +120,8 @@ export async function getForecast({ q, lat, lon, units = 'metric', lang } = {}) 
   /** Fetch forecast via backend proxy and normalize to { daily: [...] } shape. */
   const params = new URLSearchParams();
   if (q) params.set('q', q);
-  if (lat) params.set('lat', lat);
-  if (lon) params.set('lon', lon);
+  if (lat) params.set('lat', String(lat));
+  if (lon) params.set('lon', String(lon));
   if (units) params.set('units', units);
   if (lang) params.set('lang', lang);
 
@@ -105,6 +167,11 @@ export async function getForecast({ q, lat, lon, units = 'metric', lang } = {}) 
       .map(([, v]) => v);
 
     return { daily };
+  }
+
+  // If backend returns normalized envelope that got unwrapped into a simple object with daily
+  if (raw && typeof raw === 'object' && raw.daily && Array.isArray(raw.daily)) {
+    return { daily: raw.daily };
   }
 
   // Fallback to empty
